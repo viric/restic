@@ -31,6 +31,7 @@ type indexEntry struct {
 	packID backend.ID
 	offset uint
 	length uint
+	plength uint
 }
 
 // NewIndex returns a new index.
@@ -47,6 +48,7 @@ func (idx *Index) store(blob PackedBlob) {
 		packID: blob.PackID,
 		offset: blob.Offset,
 		length: blob.Length,
+		plength: blob.PLength,
 	}
 }
 
@@ -138,6 +140,7 @@ func (idx *Index) Lookup(id backend.ID) (pb PackedBlob, err error) {
 		pb := PackedBlob{
 			Type:   p.tpe,
 			Length: p.length,
+			PLength: p.plength,
 			ID:     id,
 			Offset: p.offset,
 			PackID: p.packID,
@@ -160,6 +163,7 @@ func (idx *Index) ListPack(id backend.ID) (list []PackedBlob) {
 				ID:     blobID,
 				Type:   entry.tpe,
 				Length: entry.length,
+				PLength: entry.plength,
 				Offset: entry.offset,
 				PackID: entry.packID,
 			})
@@ -228,19 +232,20 @@ func (idx *Index) AddToSupersedes(ids ...backend.ID) error {
 type PackedBlob struct {
 	Type   pack.BlobType
 	Length uint
+	PLength uint
 	ID     backend.ID
 	Offset uint
 	PackID backend.ID
 }
 
 func (pb PackedBlob) String() string {
-	return fmt.Sprintf("<PackedBlob %v type %v in pack %v: len %v, offset %v",
-		pb.ID.Str(), pb.Type, pb.PackID.Str(), pb.Length, pb.Offset)
+	return fmt.Sprintf("<PackedBlob %v type %v in pack %v: len %v, plen %v, offset %v",
+		pb.ID.Str(), pb.Type, pb.PackID.Str(), pb.Length, pb.PLength, pb.Offset)
 }
 
 // PlaintextLength returns the number of bytes the blob's plaintext occupies.
 func (pb PackedBlob) PlaintextLength() uint {
-	return pb.Length - crypto.Extension
+	return pb.PLength
 }
 
 // Each returns a channel that yields all blobs known to the index. If done is
@@ -266,6 +271,7 @@ func (idx *Index) Each(done chan struct{}) <-chan PackedBlob {
 				Offset: blob.offset,
 				Type:   blob.tpe,
 				Length: blob.length,
+				PLength: blob.plength,
 				PackID: blob.packID,
 			}:
 			}
@@ -323,6 +329,7 @@ type blobJSON struct {
 	Type   pack.BlobType `json:"type"`
 	Offset uint          `json:"offset"`
 	Length uint          `json:"length"`
+	PLength uint          `json:"plength"`
 }
 
 // generatePackList returns a list of packs.
@@ -360,6 +367,7 @@ func (idx *Index) generatePackList() ([]*packJSON, error) {
 			Type:   blob.tpe,
 			Offset: blob.offset,
 			Length: blob.length,
+			PLength: blob.plength,
 		})
 	}
 
@@ -510,11 +518,16 @@ func DecodeIndex(rd io.Reader) (idx *Index, err error) {
 	idx = NewIndex()
 	for _, pack := range idxJSON.Packs {
 		for _, blob := range pack.Blobs {
+			plen := blob.PLength
+			if plen == 0 { // Old index, pre-snappy
+				plen = blob.Length - crypto.Extension
+			}
 			idx.store(PackedBlob{
 				Type:   blob.Type,
 				ID:     blob.ID,
 				Offset: blob.Offset,
 				Length: blob.Length,
+				PLength: plen,
 				PackID: pack.ID,
 			})
 		}
@@ -547,6 +560,7 @@ func DecodeOldIndex(rd io.Reader) (idx *Index, err error) {
 				PackID: pack.ID,
 				Offset: blob.Offset,
 				Length: blob.Length,
+				PLength: blob.PLength,
 			})
 		}
 	}

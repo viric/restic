@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"github.com/golang/snappy"
 
 	"restic"
 	"restic/backend"
@@ -686,12 +687,20 @@ func checkPack(r *repository.Repository, id backend.ID) error {
 	for i, blob := range unpacker.Entries {
 		debug.Log("Checker.checkPack", "  check blob %d: %v", i, blob.ID.Str())
 
-		plainBuf := make([]byte, blob.Length)
-		plainBuf, err = crypto.Decrypt(r.Key(), plainBuf, buf[blob.Offset:blob.Offset+blob.Length])
+		blobData := buf[blob.Offset:blob.Offset+blob.Length]
+		plainBuf := make([]byte, len(blobData))
+		plainBuf, err = crypto.Decrypt(r.Key(), plainBuf, blobData)
 		if err != nil {
 			debug.Log("Checker.checkPack", "  error decrypting blob %v: %v", blob.ID.Str(), err)
 			errs = append(errs, fmt.Errorf("blob %v: %v", i, err))
 			continue
+		}
+
+		if (blob.Type & pack.Snappy) != 0 {
+			plainBuf, err = snappy.Decode(nil, plainBuf)
+			if err != nil {
+				return err
+			}
 		}
 
 		hash := backend.Hash(plainBuf)

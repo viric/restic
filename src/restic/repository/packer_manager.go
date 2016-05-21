@@ -134,6 +134,7 @@ func (r *Repository) savePacker(p *pack.Packer) error {
 			PackID: id,
 			Offset: b.Offset,
 			Length: uint(b.Length),
+			PLength: uint(b.PLength),
 		})
 	}
 

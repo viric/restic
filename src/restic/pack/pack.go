@@ -19,14 +19,19 @@ type BlobType uint8
 const (
 	Data BlobType = 0
 	Tree          = 1
+	Snappy        = 4
 )
 
 func (t BlobType) String() string {
-	switch t {
+	snappy := ""
+	if (t & Snappy) != 0 {
+		snappy = "snappy "
+	}
+	switch (t & 1) {
 	case Data:
-		return "data"
+		return snappy + "data"
 	case Tree:
-		return "tree"
+		return snappy + "tree"
 	}
 
 	return fmt.Sprintf("<BlobType %d>", t)
@@ -39,6 +44,10 @@ func (t BlobType) MarshalJSON() ([]byte, error) {
 		return []byte(`"data"`), nil
 	case Tree:
 		return []byte(`"tree"`), nil
+	case Snappy | Data:
+		return []byte(`"snappy data"`), nil
+	case Snappy | Tree:
+		return []byte(`"snappy tree"`), nil
 	}
 
 	return nil, errors.New("unknown blob type")
@@ -47,6 +56,10 @@ func (t BlobType) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON decodes the BlobType from JSON.
 func (t *BlobType) UnmarshalJSON(buf []byte) error {
 	switch string(buf) {
+	case `"snappy data"`:
+		*t = Data | Snappy
+	case `"snappy tree"`:
+		*t = Tree | Snappy
 	case `"data"`:
 		*t = Data
 	case `"tree"`:
@@ -62,6 +75,7 @@ func (t *BlobType) UnmarshalJSON(buf []byte) error {
 type Blob struct {
 	Type   BlobType
 	Length uint
+	PLength uint
 	ID     backend.ID
 	Offset uint
 }
@@ -99,7 +113,7 @@ func NewPacker(k *crypto.Key, wr io.Writer) *Packer {
 
 // Add saves the data read from rd as a new blob to the packer. Returned is the
 // number of bytes written to the pack.
-func (p *Packer) Add(t BlobType, id backend.ID, data []byte) (int, error) {
+func (p *Packer) Add(t BlobType, id backend.ID, data []byte, plen int) (int, error) {
 	p.m.Lock()
 	defer p.m.Unlock()
 
@@ -107,6 +121,7 @@ func (p *Packer) Add(t BlobType, id backend.ID, data []byte) (int, error) {
 
 	n, err := p.wr.Write(data)
 	c.Length = uint(n)
+	c.PLength = uint(plen)
 	c.Offset = p.bytes
 	p.bytes += uint(n)
 	p.blobs = append(p.blobs, c)

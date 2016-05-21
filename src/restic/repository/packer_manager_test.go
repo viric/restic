@@ -95,7 +95,7 @@ func fillPacks(t testing.TB, rnd *randReader, be Saver, pm *packerManager, buf [
 			t.Fatal(err)
 		}
 
-		n, err := packer.Add(pack.Data, id, buf)
+		n, err := packer.Add(pack.Data, id, buf, len(buf))
 		if n != l {
 			t.Errorf("Add() returned invalid number of bytes: want %v, got %v", n, l)
 		}

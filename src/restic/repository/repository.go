@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"github.com/golang/snappy"
 
 	"restic/backend"
 	"restic/crypto"
@@ -93,7 +94,7 @@ func (r *Repository) LoadBlob(t pack.BlobType, id backend.ID, plaintextBuf []byt
 		plaintextBuf = make([]byte, blob.PlaintextLength())
 	}
 
-	if blob.Type != t {
+	if (blob.Type & 1) != t {
 		debug.Log("Repo.LoadBlob", "wrong type returned for %v: wanted %v, got %v", id.Str(), t, blob.Type)
 		return nil, fmt.Errorf("blob has wrong type %v (wanted: %v)", blob.Type, t)
 	}
@@ -119,6 +120,13 @@ func (r *Repository) LoadBlob(t pack.BlobType, id backend.ID, plaintextBuf []byt
 	plaintextBuf, err = r.decryptTo(plaintextBuf, ciphertextBuf)
 	if err != nil {
 		return nil, err
+	}
+
+	if (blob.Type & pack.Snappy) != 0 {
+		plaintextBuf, err = snappy.Decode(nil, plaintextBuf)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// check hash
@@ -175,14 +183,24 @@ func (r *Repository) SaveAndEncrypt(t pack.BlobType, data []byte, id *backend.ID
 		id = &hashedID
 	}
 
-	debug.Log("Repo.Save", "save id %v (%v, %d bytes)", id.Str(), t, len(data))
+	// get buf from the pool
+	compressed := getBuf()
+	defer freeBuf(compressed)
+
+	// compress blob
+	compressed = snappy.Encode(compressed, data)
+
+	t = t | pack.Snappy
+
+	debug.Log("Repo.Save", "save id %v (%v, %d bytes, %d snappy)", id.Str(), t, len(data),
+		len(compressed))
 
 	// get buf from the pool
 	ciphertext := getBuf()
 	defer freeBuf(ciphertext)
 
 	// encrypt blob
-	ciphertext, err := r.Encrypt(ciphertext, data)
+	ciphertext, err := r.Encrypt(ciphertext, compressed)
 	if err != nil {
 		return backend.ID{}, err
 	}
@@ -194,7 +212,7 @@ func (r *Repository) SaveAndEncrypt(t pack.BlobType, data []byte, id *backend.ID
 	}
 
 	// save ciphertext
-	_, err = packer.Add(t, *id, ciphertext)
+	_, err = packer.Add(t, *id, ciphertext, len(data))
 	if err != nil {
 		return backend.ID{}, err
 	}
